@@ -32,18 +32,22 @@ export default function Page() {
   // Credentials state
   const [clientId, setClientId] = useState("Gscoq4XcL05ibEaCHDpn");
   const [clientSecret, setClientSecret] = useState("MXv6JbJjKdy4Uwge68seba6eNUu7nb9rg5LssLUN");
+  const [mockMode, setMockMode] = useState(false);
 
   // Load credentials from localStorage on mount
   React.useEffect(() => {
     const savedId = localStorage.getItem("nuvem_fiscal_client_id");
     const savedSecret = localStorage.getItem("nuvem_fiscal_client_secret");
+    const savedMock = localStorage.getItem("nuvem_fiscal_mock_mode") === "true";
     if (savedId) setClientId(savedId);
     if (savedSecret) setClientSecret(savedSecret);
+    setMockMode(savedMock);
   }, []);
 
   const saveSettings = () => {
     localStorage.setItem("nuvem_fiscal_client_id", clientId);
     localStorage.setItem("nuvem_fiscal_client_secret", clientSecret);
+    localStorage.setItem("nuvem_fiscal_mock_mode", String(mockMode));
     setShowSettings(false);
   };
 
@@ -51,6 +55,7 @@ export default function Page() {
     return {
       "x-client-id": clientId,
       "x-client-secret": clientSecret,
+      "x-mock-mode": String(mockMode),
     };
   };
 
@@ -153,6 +158,19 @@ export default function Page() {
                     placeholder="Seu Client Secret"
                     className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
                   />
+                </div>
+
+                <div className="flex items-center justify-between p-4 bg-blue-50 rounded-2xl border border-blue-100">
+                  <div className="space-y-0.5">
+                    <label className="text-sm font-bold text-blue-900">Modo de Teste</label>
+                    <p className="text-xs text-blue-600">Simular notas para teste</p>
+                  </div>
+                  <button
+                    onClick={() => setMockMode(!mockMode)}
+                    className={`w-12 h-6 rounded-full transition-colors relative ${mockMode ? 'bg-blue-600' : 'bg-gray-300'}`}
+                  >
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${mockMode ? 'left-7' : 'left-1'}`} />
+                  </button>
                 </div>
               </div>
 

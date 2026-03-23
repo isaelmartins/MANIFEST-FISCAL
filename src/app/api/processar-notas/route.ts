@@ -5,6 +5,40 @@ import { extractNFeInfoFromXml } from "@/src/lib/xml-parser";
 export async function POST(request: Request) {
   const clientId = request.headers.get("x-client-id") || undefined;
   const clientSecret = request.headers.get("x-client-secret") || undefined;
+  const mockMode = request.headers.get("x-mock-mode") === "true";
+
+  if (mockMode) {
+    // Simulação de notas para teste
+    const mockNfes = [
+      {
+        id: "mock_1",
+        numero: "000123",
+        numero_xml: "123",
+        nome_fornecedor: "Google Cloud Brasil",
+        emitente: { nome: "Google Cloud Brasil" },
+        xml_disponivel: true
+      },
+      {
+        id: "mock_2",
+        numero: "000456",
+        numero_xml: "456",
+        nome_fornecedor: "Amazon Web Services",
+        emitente: { nome: "Amazon Web Services" },
+        xml_disponivel: true
+      },
+      {
+        id: "mock_3",
+        numero: "000789",
+        numero_xml: "789",
+        nome_fornecedor: "Microsoft Azure",
+        emitente: { nome: "Microsoft Azure" },
+        xml_disponivel: true
+      }
+    ];
+    // Pequeno delay para simular processamento
+    await new Promise(r => setTimeout(r, 1500));
+    return NextResponse.json({ data: mockNfes });
+  }
 
   try {
     // 1. Busca as notas (Distribuição)
