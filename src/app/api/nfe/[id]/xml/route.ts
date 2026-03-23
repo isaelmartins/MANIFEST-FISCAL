@@ -6,9 +6,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const clientId = request.headers.get("x-client-id") || undefined;
+  const clientSecret = request.headers.get("x-client-secret") || undefined;
 
   try {
-    const response = await fetchNuvemFiscal(`/nfe/${id}/xml`);
+    const response = await fetchNuvemFiscal(`/nfe/${id}/xml`, {}, clientId, clientSecret);
 
     if (!response.ok) throw new Error("Falha ao buscar XML");
 

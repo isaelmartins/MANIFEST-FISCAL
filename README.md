@@ -10,12 +10,13 @@ Aplicação web em Next.js para gerenciar notas fiscais eletrônicas via API da 
 
 ## Configuração
 
-### Pré-requisitos
+O aplicativo utiliza as credenciais da Nuvem Fiscal para autenticação. Você pode configurá-las de três formas:
 
-- Node.js 18+
-- Conta na [Nuvem Fiscal](https://console.nuvemfiscal.com.br/)
+1.  **Interface do Usuário (BYOK)**: Clique no botão "Configurações" no topo do aplicativo e insira seu Client ID e Client Secret. Eles serão salvos localmente no seu navegador.
+2.  **Variáveis de Ambiente**: Se preferir, configure `NUVEM_FISCAL_CLIENT_ID` e `NUVEM_FISCAL_CLIENT_SECRET` no seu ambiente de deploy (ex: Netlify).
+3.  **Fallback**: O aplicativo já possui credenciais padrão configuradas para facilitar o uso imediato.
 
-### Variáveis de Ambiente
+### Variáveis de Ambiente (Opcional)
 
 Crie um arquivo `.env.local` na raiz do projeto com as seguintes variáveis:
 
