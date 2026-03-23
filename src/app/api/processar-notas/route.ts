@@ -11,14 +11,24 @@ export async function POST() {
     const data = await response.json();
     const nfes = data.data || [];
 
-    // 2. Processamento opcional (Ciência/Confirmação automática se necessário)
-    // Para este exemplo, vamos apenas retornar a lista para o frontend processar ou exibir
-    // Se o usuário quiser automatizar a ciência no sync, poderíamos iterar aqui.
-    
-    // Vamos enriquecer os dados buscando o XML de cada nota para extrair o nome real do fornecedor
-    // Nota: Em produção com muitas notas, isso deve ser feito sob demanda ou em background.
+    // 2. Processamento (Ciência -> Confirmação -> Enriquecimento)
     const processedNfes = await Promise.all(nfes.map(async (nfe: any) => {
       try {
+        // Ciência da Operação (210210)
+        await fetchNuvemFiscal(`/nfe/${nfe.id}/manifestacao`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tipo_evento: "210210" }),
+        });
+
+        // Confirmação da Operação (210200)
+        await fetchNuvemFiscal(`/nfe/${nfe.id}/manifestacao`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tipo_evento: "210200" }),
+        });
+
+        // Download do XML para extrair info
         const xmlRes = await fetchNuvemFiscal(`/nfe/${nfe.id}/xml`);
         if (xmlRes.ok) {
           const xmlText = await xmlRes.text();
@@ -31,7 +41,7 @@ export async function POST() {
           };
         }
       } catch (e) {
-        console.error(`Erro ao processar XML da nota ${nfe.id}`);
+        console.error(`Erro ao processar nota ${nfe.id}:`, e);
       }
       return { ...nfe, xml_disponivel: false };
     }));

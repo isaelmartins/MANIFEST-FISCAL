@@ -143,6 +143,13 @@ export default function Page() {
             </div>
           )}
         </div>
+
+        {/* Footer */}
+        <div className="pt-12 text-center">
+          <p className="text-xs text-gray-400 font-medium uppercase tracking-widest">
+            Hospedado na Netlify • Integrado com Nuvem Fiscal
+          </p>
+        </div>
       </div>
     </div>
   );
