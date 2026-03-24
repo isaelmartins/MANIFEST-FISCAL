@@ -9,7 +9,17 @@ import {
   CheckCircle2,
   Settings,
   X,
+  Eye,
+  Printer,
 } from "lucide-react";
+
+interface Evento {
+  id: string;
+  tipo_evento: string;
+  data_evento: string;
+  status: string;
+  protocolo?: string;
+}
 
 interface NFe {
   id: string;
@@ -28,25 +38,37 @@ export default function Page() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [selectedNfe, setSelectedNfe] = useState<NFe | null>(null);
+  const [events, setEvents] = useState<Evento[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(false);
   
   // Credentials state
   const [clientId, setClientId] = useState("Gscoq4XcL05ibEaCHDpn");
   const [clientSecret, setClientSecret] = useState("MXv6JbJjKdy4Uwge68seba6eNUu7nb9rg5LssLUN");
+  const [cnpj, setCnpj] = useState("");
+  const [ambiente, setAmbiente] = useState("homologacao");
   const [mockMode, setMockMode] = useState(false);
 
   // Load credentials from localStorage on mount
   React.useEffect(() => {
     const savedId = localStorage.getItem("nuvem_fiscal_client_id");
     const savedSecret = localStorage.getItem("nuvem_fiscal_client_secret");
+    const savedCnpj = localStorage.getItem("nuvem_fiscal_cnpj");
+    const savedAmbiente = localStorage.getItem("nuvem_fiscal_ambiente");
     const savedMock = localStorage.getItem("nuvem_fiscal_mock_mode") === "true";
+    
     if (savedId) setClientId(savedId);
     if (savedSecret) setClientSecret(savedSecret);
+    if (savedCnpj) setCnpj(savedCnpj);
+    if (savedAmbiente) setAmbiente(savedAmbiente);
     setMockMode(savedMock);
   }, []);
 
   const saveSettings = () => {
     localStorage.setItem("nuvem_fiscal_client_id", clientId);
     localStorage.setItem("nuvem_fiscal_client_secret", clientSecret);
+    localStorage.setItem("nuvem_fiscal_cnpj", cnpj);
+    localStorage.setItem("nuvem_fiscal_ambiente", ambiente);
     localStorage.setItem("nuvem_fiscal_mock_mode", String(mockMode));
     setShowSettings(false);
   };
@@ -55,13 +77,15 @@ export default function Page() {
     return {
       "x-client-id": clientId,
       "x-client-secret": clientSecret,
+      "x-cnpj": cnpj.replace(/\D/g, ""),
+      "x-ambiente": ambiente,
       "x-mock-mode": String(mockMode),
     };
   };
 
   const sincronizarNotas = async () => {
-    if (!clientId || !clientSecret) {
-      setError("Por favor, configure suas credenciais nas configurações.");
+    if (!clientId || !clientSecret || (!cnpj && !mockMode)) {
+      setError("Por favor, configure suas credenciais e CNPJ nas configurações.");
       setShowSettings(true);
       return;
     }
@@ -112,6 +136,49 @@ export default function Page() {
     }
   };
 
+  const baixarPdf = async (nfe: NFe) => {
+    try {
+      const response = await fetch(`/api/nfe/${nfe.id}/pdf`, {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) throw new Error("Erro ao baixar PDF");
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+
+      // Nome do arquivo: [Numero] - [Fornecedor].pdf
+      const fileName = `${nfe.numero_xml || nfe.numero} - ${nfe.nome_fornecedor || nfe.emitente.nome}.pdf`;
+      a.download = fileName;
+
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const verRelatorio = async (nfe: NFe) => {
+    setSelectedNfe(nfe);
+    setLoadingEvents(true);
+    setEvents([]);
+    try {
+      const response = await fetch(`/api/nfe/${nfe.id}/eventos`, {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) throw new Error("Erro ao buscar eventos");
+      const result = await response.json();
+      setEvents(result.data || []);
+    } catch (err: any) {
+      console.error(err.message);
+    } finally {
+      setLoadingEvents(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center py-12 px-4">
       <div className="max-w-3xl w-full space-y-8 relative">
@@ -139,6 +206,27 @@ export default function Page() {
               </div>
               
               <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-gray-700">CNPJ da Empresa</label>
+                  <input
+                    type="text"
+                    value={cnpj}
+                    onChange={(e) => setCnpj(e.target.value)}
+                    placeholder="Somente números"
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-gray-700">Ambiente</label>
+                  <select
+                    value={ambiente}
+                    onChange={(e) => setAmbiente(e.target.value)}
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                  >
+                    <option value="homologacao">Homologação (Testes)</option>
+                    <option value="producao">Produção</option>
+                  </select>
+                </div>
                 <div className="space-y-2">
                   <label className="text-sm font-semibold text-gray-700">Client ID</label>
                   <input
@@ -184,6 +272,97 @@ export default function Page() {
                 <p className="text-center text-xs text-gray-400 mt-4">
                   Suas credenciais são salvas apenas no seu navegador.
                 </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Relatório Modal */}
+        {selectedNfe && (
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
+              <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-white sticky top-0 z-10">
+                <div className="flex items-center gap-3">
+                  <div className="bg-blue-50 p-2 rounded-xl">
+                    <FileText className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <h2 className="text-xl font-bold text-gray-900">Relatório da NF-e {selectedNfe.numero_xml || selectedNfe.numero}</h2>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => window.print()} 
+                    className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors font-medium"
+                  >
+                    <Printer className="w-4 h-4" />
+                    Imprimir / Salvar PDF
+                  </button>
+                  <button onClick={() => setSelectedNfe(null)} className="text-gray-400 hover:text-gray-600 p-2">
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-8 space-y-8 print:p-0">
+                {/* DANFE Section (Simulated or Link) */}
+                <section className="space-y-4">
+                  <h3 className="text-lg font-bold text-gray-900 border-l-4 border-blue-600 pl-3">DANFE (Documento Auxiliar da NF-e)</h3>
+                  <div className="aspect-[1/1.4] bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center text-center p-8">
+                    <FileText className="w-16 h-16 text-gray-300 mb-4" />
+                    <p className="text-gray-500 font-medium mb-4">O PDF oficial da DANFE pode ser baixado diretamente abaixo.</p>
+                    <button 
+                      onClick={() => baixarPdf(selectedNfe)}
+                      className="px-6 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100"
+                    >
+                      Baixar PDF Oficial
+                    </button>
+                  </div>
+                </section>
+
+                {/* Events Section */}
+                <section className="space-y-4">
+                  <h3 className="text-lg font-bold text-gray-900 border-l-4 border-blue-600 pl-3">Consulta de Eventos</h3>
+                  <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-100">
+                          <th className="px-6 py-4 text-sm font-bold text-gray-700 uppercase tracking-wider">Evento</th>
+                          <th className="px-6 py-4 text-sm font-bold text-gray-700 uppercase tracking-wider">Data/Hora</th>
+                          <th className="px-6 py-4 text-sm font-bold text-gray-700 uppercase tracking-wider">Status</th>
+                          <th className="px-6 py-4 text-sm font-bold text-gray-700 uppercase tracking-wider">Protocolo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {loadingEvents ? (
+                          <tr>
+                            <td colSpan={4} className="px-6 py-12 text-center text-gray-400">
+                              <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2" />
+                              Carregando eventos...
+                            </td>
+                          </tr>
+                        ) : events.length > 0 ? (
+                          events.map((event) => (
+                            <tr key={event.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
+                              <td className="px-6 py-4 font-medium text-gray-900">{event.tipo_evento}</td>
+                              <td className="px-6 py-4 text-gray-500">{new Date(event.data_evento).toLocaleString('pt-BR')}</td>
+                              <td className="px-6 py-4">
+                                <span className="px-3 py-1 bg-green-50 text-green-600 text-xs font-bold rounded-full uppercase">
+                                  {event.status}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 font-mono text-sm text-gray-500">{event.protocolo || "-"}</td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={4} className="px-6 py-12 text-center text-gray-400">
+                              Nenhum evento registrado para esta nota.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
               </div>
             </div>
           </div>
@@ -238,8 +417,13 @@ export default function Page() {
                     <CheckCircle2 className="w-6 h-6 text-blue-500" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-gray-900">
+                    <h3 className="font-bold text-gray-900 flex items-center gap-2">
                       NF-e: {nfe.numero_xml || nfe.numero}
+                      {!nfe.xml_disponivel && (
+                        <span className="text-[10px] bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                          Aguardando XML
+                        </span>
+                      )}
                     </h3>
                     <p className="text-sm text-gray-500">
                       {nfe.nome_fornecedor || nfe.emitente.nome}
@@ -247,13 +431,24 @@ export default function Page() {
                   </div>
                 </div>
                 
-                <button
-                  onClick={() => baixarXml(nfe)}
-                  className="p-3 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
-                  title="Baixar XML"
-                >
-                  <Download className="w-6 h-6" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => verRelatorio(nfe)}
+                    disabled={!nfe.xml_disponivel}
+                    className={`p-3 rounded-xl transition-all ${nfe.xml_disponivel ? "text-gray-400 hover:text-blue-600 hover:bg-blue-50" : "text-gray-300 cursor-not-allowed"}`}
+                    title={nfe.xml_disponivel ? "Ver Relatório (DANFE + Eventos)" : "XML ainda não disponibilizado pela SEFAZ"}
+                  >
+                    <Eye className="w-6 h-6" />
+                  </button>
+                  <button
+                    onClick={() => baixarXml(nfe)}
+                    disabled={!nfe.xml_disponivel}
+                    className={`p-3 rounded-xl transition-all ${nfe.xml_disponivel ? "text-gray-400 hover:text-blue-600 hover:bg-blue-50" : "text-gray-300 cursor-not-allowed"}`}
+                    title={nfe.xml_disponivel ? "Baixar XML" : "XML ainda não disponibilizado pela SEFAZ"}
+                  >
+                    <Download className="w-6 h-6" />
+                  </button>
+                </div>
               </div>
             ))
           ) : !loading && (

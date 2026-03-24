@@ -29,7 +29,7 @@ export async function GET(
   }
 
   try {
-    const response = await fetchNuvemFiscal(`/nfe/${id}/xml`, {}, clientId, clientSecret);
+    const response = await fetchNuvemFiscal(`/distribuicao/nfe/documentos/${id}/xml`, {}, clientId, clientSecret);
 
     if (!response.ok) throw new Error("Falha ao buscar XML");
 

@@ -5,6 +5,8 @@ import { extractNFeInfoFromXml } from "@/src/lib/xml-parser";
 export async function POST(request: Request) {
   const clientId = request.headers.get("x-client-id") || undefined;
   const clientSecret = request.headers.get("x-client-secret") || undefined;
+  const cnpj = request.headers.get("x-cnpj") || undefined;
+  const ambiente = request.headers.get("x-ambiente") || "homologacao";
   const mockMode = request.headers.get("x-mock-mode") === "true";
 
   if (mockMode) {
@@ -40,51 +42,113 @@ export async function POST(request: Request) {
     return NextResponse.json({ data: mockNfes });
   }
 
+  if (!cnpj) {
+    return NextResponse.json({ error: "CNPJ não informado" }, { status: 400 });
+  }
+
   try {
-    // 1. Busca as notas (Distribuição)
-    const response = await fetchNuvemFiscal("/nfe", {}, clientId, clientSecret);
-    if (!response.ok) throw new Error("Falha ao buscar notas na Nuvem Fiscal");
+    // 1. Solicita a distribuição de DF-e (busca novas notas na SEFAZ)
+    console.log(`Solicitando distribuição para CNPJ ${cnpj} no ambiente ${ambiente}...`);
+    const distRes = await fetchNuvemFiscal("/distribuicao/nfe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cpf_cnpj: cnpj,
+        ambiente: ambiente,
+        tipo_consulta: "dist-nsu"
+      })
+    }, clientId, clientSecret);
+    
+    if (!distRes.ok) {
+      const errText = await distRes.text();
+      console.error("Erro ao solicitar distribuição:", errText);
+      // We don't throw here because maybe there are already documents we can list
+    } else {
+      // Wait a bit for the distribution to be processed by Nuvem Fiscal
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    // 2. Lista os documentos de distribuição (notas)
+    const url = `/distribuicao/nfe/documentos?cpf_cnpj=${cnpj}&ambiente=${ambiente}&tipo_documento=nota&$top=50`;
+    console.log(`Buscando documentos: ${url}`);
+    const response = await fetchNuvemFiscal(url, {}, clientId, clientSecret);
+    
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Falha ao buscar documentos: ${errText}`);
+    }
     
     const data = await response.json();
-    const nfes = data.data || [];
+    const documentos = data.data || [];
 
-    // 2. Processamento (Ciência -> Confirmação -> Enriquecimento)
-    const processedNfes = await Promise.all(nfes.map(async (nfe: any) => {
+    // 3. Processamento (Ciência -> Confirmação -> Enriquecimento)
+    const processedNfes = await Promise.all(documentos.map(async (doc: any) => {
+      let xmlText = "";
+      let xmlDisponivel = false;
+
       try {
-        // Ciência da Operação (210210)
-        await fetchNuvemFiscal(`/nfe/${nfe.id}/manifestacao`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tipo_evento: "210210" }),
-        }, clientId, clientSecret);
+        // Se for resumo, precisamos manifestar Ciência da Operação para obter o XML completo
+        if (doc.resumo) {
+          console.log(`Manifestando Ciência da Operação para nota ${doc.chave_acesso}...`);
+          await fetchNuvemFiscal(`/distribuicao/nfe/manifestacoes`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              cpf_cnpj: cnpj,
+              ambiente: ambiente,
+              chave_acesso: doc.chave_acesso,
+              tipo_evento: "210210" // Ciência da Operação
+            }),
+          }, clientId, clientSecret);
 
-        // Confirmação da Operação (210200)
-        await fetchNuvemFiscal(`/nfe/${nfe.id}/manifestacao`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tipo_evento: "210200" }),
-        }, clientId, clientSecret);
+          // Confirmação da Operação (210200) - Opcional, mas bom para garantir
+          await fetchNuvemFiscal(`/distribuicao/nfe/manifestacoes`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              cpf_cnpj: cnpj,
+              ambiente: ambiente,
+              chave_acesso: doc.chave_acesso,
+              tipo_evento: "210200" // Confirmação da Operação
+            }),
+          }, clientId, clientSecret);
+        }
 
         // Download do XML para extrair info
-        const xmlRes = await fetchNuvemFiscal(`/nfe/${nfe.id}/xml`, {}, clientId, clientSecret);
+        const xmlRes = await fetchNuvemFiscal(`/distribuicao/nfe/documentos/${doc.id}/xml`, {}, clientId, clientSecret);
         if (xmlRes.ok) {
-          const xmlText = await xmlRes.text();
-          const info = extractNFeInfoFromXml(xmlText);
-          return {
-            ...nfe,
-            numero_xml: info.numero,
-            nome_fornecedor: info.nomeEmitente,
-            xml_disponivel: true
-          };
+          xmlText = await xmlRes.text();
+          xmlDisponivel = true;
+        } else {
+          console.warn(`XML não disponível para ${doc.id}`);
         }
       } catch (e) {
-        console.error(`Erro ao processar nota ${nfe.id}:`, e);
+        console.error(`Erro ao processar documento ${doc.id}:`, e);
       }
-      return { ...nfe, xml_disponivel: false };
+
+      let info = { numero: doc.chave_acesso?.substring(25, 34) || "N/A", nomeEmitente: "Desconhecido" };
+      if (xmlDisponivel && xmlText) {
+        try {
+          info = extractNFeInfoFromXml(xmlText);
+        } catch (e) {
+          console.error("Erro ao fazer parse do XML:", e);
+        }
+      }
+
+      return {
+        id: doc.id,
+        numero: doc.chave_acesso || doc.id,
+        numero_xml: info.numero,
+        nome_fornecedor: info.nomeEmitente,
+        emitente: { nome: info.nomeEmitente },
+        xml_disponivel: xmlDisponivel,
+        resumo: doc.resumo
+      };
     }));
 
     return NextResponse.json({ data: processedNfes });
   } catch (error: any) {
+    console.error("Erro na rota processar-notas:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

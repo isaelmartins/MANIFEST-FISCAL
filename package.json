@@ -10,6 +10,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@alijunior/nuvemfiscal-sdk-node": "^2.3.3",
     "@tailwindcss/postcss": "^4.2.2",
     "clsx": "^2.1.1",
     "fast-xml-parser": "^5.5.8",
